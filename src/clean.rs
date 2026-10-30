@@ -1,16 +1,18 @@
+use crate::settings::{Settings, Site};
+
 type List = &'static [&'static str];
 
-// (hosts, path markers ("" = any path), marker is the whole path, params to keep)
+// (site, hosts, path markers ("" = any path), marker is the whole path, params to keep)
 #[rustfmt::skip]
-const PATH_RULES: &[(List, List, bool, List)] = &[
-    (&["instagram.com"], &["/p/", "/reel/", "/reels/", "/tv/"], false, &["img_index"]),
-    (&["x.com", "twitter.com"], &["/status/"], false, &[]),
-    (&["youtu.be"], &[""], false, &["t"]),
-    (&["youtube.com"], &["/shorts/"], false, &[]),
-    (&["youtube.com"], &["/watch", "/watch/"], true, &["v", "t", "list", "index"]),
-    (&["tiktok.com"], &["/video/"], false, &[]),
-    (&["threads.net", "threads.com"], &["/post/"], false, &[]),
-    (&["reddit.com"], &["/comments/"], false, &[]),
+const PATH_RULES: &[(Site, List, List, bool, List)] = &[
+    (Site::Instagram, &["instagram.com"], &["/p/", "/reel/", "/reels/", "/tv/"], false, &["img_index"]),
+    (Site::X, &["x.com", "twitter.com"], &["/status/"], false, &[]),
+    (Site::YouTube, &["youtu.be"], &[""], false, &["t"]),
+    (Site::YouTube, &["youtube.com"], &["/shorts/"], false, &[]),
+    (Site::YouTube, &["youtube.com"], &["/watch", "/watch/"], true, &["v", "t", "list", "index"]),
+    (Site::TikTok, &["tiktok.com"], &["/video/"], false, &[]),
+    (Site::Threads, &["threads.net", "threads.com"], &["/post/"], false, &[]),
+    (Site::Reddit, &["reddit.com"], &["/comments/"], false, &[]),
 ];
 
 const DENYLIST: List = &[
@@ -18,13 +20,14 @@ const DENYLIST: List = &[
     "igsh", "igshid", "mc_cid", "mc_eid", "ref_src", "ref_url", "_ga", "_gl", "si",
 ];
 
-pub fn clean(text: &str) -> Option<String> {
+pub fn clean(text: &str, settings: &Settings) -> Option<String> {
     let url = text.trim();
     if url.contains(|c: char| c.is_whitespace() || c.is_control()) {
         return None;
     }
     let (head, fragment) = url.split_at(url.find('#').unwrap_or(url.len()));
-    let (base, query) = head.split_once('?')?;
+    // A link with no query still goes on: fixupx can rewrite its host.
+    let (base, query) = head.split_once('?').unwrap_or((head, ""));
     let (scheme, rest) = base.split_once("://")?;
     if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
         return None;
@@ -44,11 +47,22 @@ pub fn clean(text: &str) -> Option<String> {
     }
     let host = host.to_ascii_lowercase();
 
-    let rule = PATH_RULES.iter().find(|(hosts, markers, exact, _)| {
-        // Subdomain match already covers www./m./mobile., so they need no stripping.
+    // Subdomain match already covers www./m./mobile., so they need no stripping.
+    let on_host = |hosts: List| {
         hosts
             .iter()
             .any(|d| host == *d || host.strip_suffix(d).is_some_and(|s| s.ends_with('.')))
+    };
+    // A disabled site is left completely alone, so the denylist below must not reach it either.
+    if PATH_RULES
+        .iter()
+        .any(|(site, hosts, ..)| !settings.sites[*site as usize] && on_host(hosts))
+    {
+        return None;
+    }
+
+    let rule = PATH_RULES.iter().find(|(_, hosts, markers, exact, _)| {
+        on_host(hosts)
             && markers
                 .iter()
                 .any(|m| if *exact { path == *m } else { path.contains(m) })
@@ -59,11 +73,23 @@ pub fn clean(text: &str) -> Option<String> {
         .filter(|param| {
             let name = decoded_lower(param.split('=').next().unwrap_or_default());
             match rule {
-                Some((_, _, _, keep)) => keep.contains(&name.as_str()),
+                Some((.., keep)) => keep.contains(&name.as_str()),
                 None => !name.starts_with("utm_") && !DENYLIST.contains(&name.as_str()),
             }
         })
         .collect();
+
+    // Only hosts that serve posts: developer.x.com/en/status/ is not one, so it keeps its host.
+    let post_host = ["", "www.", "m.", "mobile."].iter().any(|prefix| {
+        host.strip_prefix(prefix)
+            .is_some_and(|h| h == "x.com" || h == "twitter.com")
+    });
+    let base = if settings.fixupx && post_host && matches!(rule, Some((Site::X, ..))) {
+        // Userinfo and port are dropped too: neither belongs on a request to another host.
+        format!("{scheme}://fixupx.com{path}")
+    } else {
+        base.to_string()
+    };
 
     let query = kept.join("&");
     let cleaned = if query.is_empty() {
@@ -100,14 +126,15 @@ fn decoded_lower(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::clean;
+    use crate::settings::{Settings, Site};
+
+    const INSTAGRAM: &str = "https://www.instagram.com/p/De9S54vjjrO/?utm_source=ig_web_copy_link&mdxt=NTc4MTIwNjQ2YQ==";
+    const INSTAGRAM_CLEAN: &str = "https://www.instagram.com/p/De9S54vjjrO/";
 
     #[test]
     fn strips_tracking() {
         for (input, want) in [
-            (
-                "https://www.instagram.com/p/De9S54vjjrO/?utm_source=ig_web_copy_link&mdxt=NTc4MTIwNjQ2YQ==",
-                "https://www.instagram.com/p/De9S54vjjrO/",
-            ),
+            (INSTAGRAM, INSTAGRAM_CLEAN),
             (
                 "https://www.instagram.com/reel/ABC123/?psln=MTIzNDU2Nzg5MA==",
                 "https://www.instagram.com/reel/ABC123/",
@@ -221,7 +248,11 @@ mod tests {
                 "https://www.youtube.com/c/watchmojo?foo=1",
             ),
         ] {
-            assert_eq!(clean(input).as_deref(), Some(want), "{input}");
+            assert_eq!(
+                clean(input, &Settings::default()).as_deref(),
+                Some(want),
+                "{input}"
+            );
         }
     }
 
@@ -254,7 +285,86 @@ mod tests {
             "https://example.com/?utm_source=x\u{0}",
             "https://[::1]:8080/?utm_source=x",
         ] {
-            assert_eq!(clean(input), None, "{input}");
+            assert_eq!(clean(input, &Settings::default()), None, "{input}");
         }
+    }
+
+    #[test]
+    fn disabled_site_is_left_untouched() {
+        for (site, link) in [
+            (Site::Instagram, INSTAGRAM),
+            (
+                Site::Instagram,
+                "https://instagram.com/explore/?utm_source=x",
+            ),
+            (Site::X, "https://x.com/u/status/1?s=20"),
+            (Site::X, "https://twitter.com/u/status/1?s=20"),
+            (Site::X, "https://x.com/home?utm_source=a"),
+            (Site::YouTube, "https://youtu.be/a?si=x"),
+            (Site::YouTube, "https://www.youtube.com/watch?v=a&si=x"),
+            (Site::TikTok, "https://www.tiktok.com/@u/video/1?a=1"),
+            (Site::Threads, "https://www.threads.net/@u/post/a?xmt=1"),
+            (Site::Threads, "https://www.threads.com/@u/post/a?xmt=1"),
+            (Site::Reddit, "https://old.reddit.com/r/a/comments/b/?a=1"),
+        ] {
+            let mut settings = Settings::default();
+            assert!(clean(link, &settings).is_some(), "{link}");
+            settings.sites[site as usize] = false;
+            assert_eq!(clean(link, &settings), None, "{link}");
+        }
+
+        let mut x_off = Settings::default();
+        x_off.sites[Site::X as usize] = false;
+        assert_eq!(clean(INSTAGRAM, &x_off).as_deref(), Some(INSTAGRAM_CLEAN));
+        // Other sites and the denylist keep working.
+        assert_eq!(
+            clean("https://example.com/?utm_source=x", &x_off).as_deref(),
+            Some("https://example.com/")
+        );
+    }
+
+    #[test]
+    fn fixupx_moves_x_posts_only() {
+        let on = Settings {
+            fixupx: true,
+            ..Settings::default()
+        };
+        for (input, want) in [
+            (
+                "https://x.com/jimcramer/status/2116177685546189163?a=GkPAHMY28CmlFwUVB9g&s=20",
+                Some("https://fixupx.com/jimcramer/status/2116177685546189163"),
+            ),
+            (
+                "https://mobile.twitter.com/u/status/1",
+                Some("https://fixupx.com/u/status/1"),
+            ),
+            (
+                "http://www.x.com/u/status/1?s=20#frag",
+                Some("http://fixupx.com/u/status/1#frag"),
+            ),
+            (
+                "https://user:pw@m.twitter.com:8443/u/status/1",
+                Some("https://fixupx.com/u/status/1"),
+            ),
+            (
+                "https://x.com/home?utm_source=a",
+                Some("https://x.com/home"),
+            ),
+            (
+                "https://developer.x.com/en/status/1?s=20",
+                Some("https://developer.x.com/en/status/1"),
+            ),
+            ("https://x.com/home", None),
+            ("https://fixupx.com/u/status/1?s=20", None),
+            ("https://example.com/u/status/1", None),
+            (INSTAGRAM, Some(INSTAGRAM_CLEAN)),
+        ] {
+            assert_eq!(clean(input, &on).as_deref(), want, "{input}");
+        }
+
+        let mut x_off = on.clone();
+        x_off.sites[Site::X as usize] = false;
+        assert_eq!(clean("https://x.com/u/status/1", &x_off), None);
+        assert_eq!(clean("https://x.com/u/status/1?s=20", &x_off), None);
     }
 }

@@ -3,10 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -22,10 +23,16 @@ jobs:
         include:
           - runner: blacksmith-4vcpu-ubuntu-2404
             bin: tracking-trim
+            asset: tracking-trim-linux-x86_64.tar.gz
+          - runner: blacksmith-4vcpu-ubuntu-2404-arm
+            bin: tracking-trim
+            asset: tracking-trim-linux-arm64.tar.gz
           - runner: blacksmith-4vcpu-windows-2025
             bin: tracking-trim.exe
+            asset: tracking-trim-windows-x86_64.zip
           - runner: blacksmith-6vcpu-macos-latest
             bin: tracking-trim
+            asset: tracking-trim-macos-arm64.tar.gz
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
@@ -35,16 +42,27 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: true
-          shared-key: ${{ runner.os }}
-      - if: runner.os == 'Linux'
+          shared-key: ${{ runner.os }}-${{ runner.arch }}
+      - if: runner.os == 'Linux' && runner.arch == 'X64'
         run: cargo fmt --check
-      - if: runner.os == 'Linux'
+      - if: runner.os == 'Linux' && runner.arch == 'X64'
         run: cargo clippy --release --locked -- -D warnings
       - run: cargo test --release --locked
       - run: cargo build --release --locked
       - uses: actions/upload-artifact@v7
         with:
-          name: tracking-trim-${{ runner.os }}
+          name: tracking-trim-${{ runner.os }}-${{ runner.arch }}
           path: target/release/${{ matrix.bin }}
           retention-days: 14
           if-no-files-found: error
+      - if: startsWith(github.ref, 'refs/tags/') && runner.os != 'Windows'
+        working-directory: target/release
+        run: tar czf ../../${{ matrix.asset }} ${{ matrix.bin }}
+      - if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Windows'
+        run: Compress-Archive -Path target/release/${{ matrix.bin }} -DestinationPath ${{ matrix.asset }}
+      - if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v3
+        with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: ${{ matrix.asset }}

@@ -20,14 +20,17 @@ with tracking parameters removed. See PLAN.md for the design and rules table.
 - Cleaning rules live in `src/clean.rs`. Prefer path-based "drop every query
   param" rules for sites whose path already identifies the content; use the
   global denylist only for everything else. Add a unit test for every new rule.
-- No network calls, no settings file, no clipboard history. Leave the
-  clipboard untouched when in doubt.
+- No network calls, no clipboard history. Leave the clipboard untouched when in
+  doubt.
+- Settings are one plain key=value file in the OS config dir, changed only
+  through the tray menu; no settings window.
 
 ## Layout
 
 ```
-src/clean.rs   pure clean(&str) -> Option<String>, rules, unit tests
-src/main.rs    tray icon, clipboard poll loop, per-OS run loop
+src/clean.rs     pure clean(&str, &Settings) -> Option<String>, rules, unit tests
+src/settings.rs  Site enum, Settings, load/save of the key=value file
+src/main.rs      tray icon, clipboard poll loop, per-OS run loop
 flake.nix      dev shell (toolchain pinned by rust-toolchain.toml)
 .github/workflows/ci.yml   Blacksmith matrix, cached, uploads binaries
 ```

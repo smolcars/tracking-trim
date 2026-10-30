@@ -1,4 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#9333ea"/>
-  <text x="32" y="32" dy="0.35em" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="26" font-weight="600" fill="#ffffff">TT</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <mask id="blade" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+    <rect width="512" height="512" fill="#fff"/>
+    <rect y="163" width="512" height="35" fill="#000"/>
+  </mask>
+  <rect width="512" height="512" rx="112" fill="#9333ea"/>
+  <g fill="none" stroke="#fff" stroke-width="40" stroke-linecap="round">
+    <path transform="translate(256 256) rotate(-45)" d="M33 0A70 70 0 0 0-37-70H-103A70 70 0 0 0-103 70H-73"/>
+    <g mask="url(#blade)">
+      <path transform="translate(256 256) rotate(-45)" d="M-33 0A70 70 0 0 0 37 70H103A70 70 0 0 0 103-70H41"/>
+    </g>
+  </g>
 </svg>

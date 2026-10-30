@@ -14,14 +14,15 @@ URL splitting is hand-rolled on std (only whole `key=value` segments are ever
 deleted, nothing is decoded or re-encoded). The run loop tray-icon needs on
 macOS/Windows comes from crates it already pulls in (`objc2-app-kit`
 NSApplication, `windows-sys` GetMessage loop); Linux's ksni backend runs its own
-thread. No settings file, no UI window, no network.
+thread. No UI window, no network.
 
 ## Files
 
 ```
 Cargo.toml
-src/clean.rs   pure fn clean(&str) -> Option<String> + rules table + tests   (~100 lines)
-src/main.rs    tray + poll loop                                              (~80 lines)
+src/clean.rs     pure fn clean(&str, &Settings) -> Option<String> + rules table + tests
+src/settings.rs  Site enum, Settings, key=value load/save
+src/main.rs      tray + poll loop
 README.md      build/run per OS, Linux notes, autostart notes
 ```
 
@@ -52,6 +53,10 @@ Input must be one trimmed http/https URL, no inner whitespace. Otherwise `None`.
 3. Return `None` when nothing changed, so the clipboard is never rewritten
    needlessly. Fragment (`#...`) is left alone.
 
+4. **Settings:** a host of a disabled site returns `None` before any rule runs.
+   With fixupx on, an X rule match on a bare, `www.`, `m.` or `mobile.` host is
+   rewritten to `fixupx.com`, which is not an X host, so it is never redone.
+
 Tests (same file, `cargo test`): the two sample links from the brief, a
 youtube watch link keeping `v`+`t`, a youtu.be link keeping `t`, a clean URL
 (`None`), prose containing a URL (`None`), a non-URL (`None`), a mailto (`None`).
@@ -63,7 +68,9 @@ youtube watch link keeping `v`+`t`, a youtu.be link keeping `t`, a clean URL
   Accessory, so there is no Dock icon even as a bare binary. Windows: Win32
   message loop. Linux: none needed.
 - Tray icon: 32x32 RGBA drawn in code (filled circle), no image file, no
-  `image` crate. Menu: `Pause` / `Resume` toggle, `Quit`.
+  `image` crate. Menu: `Pause` toggle, `Sites` submenu, fixupx toggle, `Quit`.
+- Settings: one `key=value` file in the OS config dir, read at start and saved
+  on every menu toggle; missing or unreadable means defaults.
 - Background thread: every 250 ms `arboard.get_text()`; skip if paused or
   equal to last seen; if `clean()` returns `Some(c)`, `set_text(c)` and
   remember `c` as last seen so we never loop on our own write.
@@ -102,7 +109,6 @@ after local verification.
 
 ## Deliberately not in v1
 
-- Launch at login (README gives the manual step per OS).
 - `.app` bundle, code signing, notarization.
 - Custom rule file, settings window, clipboard history, "restore original".
 - Short-link expansion (needs network).
