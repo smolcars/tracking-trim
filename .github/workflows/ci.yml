@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: blacksmith-4vcpu-ubuntu-2404
+            bin: tracking-trim
+          - runner: blacksmith-4vcpu-windows-2025
+            bin: tracking-trim.exe
+          - runner: blacksmith-6vcpu-macos-latest
+            bin: tracking-trim
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: true
+          shared-key: ${{ runner.os }}
+      - if: runner.os == 'Linux'
+        run: cargo fmt --check
+      - if: runner.os == 'Linux'
+        run: cargo clippy --release --locked -- -D warnings
+      - run: cargo test --release --locked
+      - run: cargo build --release --locked
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tracking-trim-${{ runner.os }}
+          path: target/release/${{ matrix.bin }}
+          retention-days: 14
+          if-no-files-found: error
