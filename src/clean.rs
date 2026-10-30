@@ -22,7 +22,8 @@ const DENYLIST: List = &[
 
 pub fn clean(text: &str, settings: &Settings) -> Option<String> {
     let url = text.trim();
-    if url.contains(|c: char| c.is_whitespace() || c.is_control()) {
+    // Browsers read a backslash as a slash, which can move the host boundary, so such URLs are left alone.
+    if url.contains(|c: char| c.is_whitespace() || c.is_control() || c == '\\') {
         return None;
     }
     let (head, fragment) = url.split_at(url.find('#').unwrap_or(url.len()));
@@ -284,6 +285,7 @@ mod tests {
             "https://example.com:abc/?utm_source=x",
             "https://example.com/?utm_source=x\u{0}",
             "https://[::1]:8080/?utm_source=x",
+            "https://example.com\\@x.com/u/status/1?s=20",
         ] {
             assert_eq!(clean(input, &Settings::default()), None, "{input}");
         }
@@ -357,6 +359,8 @@ mod tests {
             ("https://x.com/home", None),
             ("https://fixupx.com/u/status/1?s=20", None),
             ("https://example.com/u/status/1", None),
+            // The real host is example.com: a backslash ends the authority in browsers.
+            ("https://example.com\\@x.com/u/status/1", None),
             (INSTAGRAM, Some(INSTAGRAM_CLEAN)),
         ] {
             assert_eq!(clean(input, &on).as_deref(), want, "{input}");
