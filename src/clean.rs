@@ -35,7 +35,10 @@ pub fn clean(text: &str) -> Option<String> {
     // Malformed authority or dot segments: a browser would read the URL differently, so leave it.
     if host.is_empty()
         || !port.bytes().all(|b| b.is_ascii_digit())
-        || path.split('/').any(|seg| seg == "." || seg == "..")
+        || !(port.is_empty() || port.parse::<u16>().is_ok())
+        || path
+            .split('/')
+            .any(|seg| matches!(decoded_lower(seg).as_str(), "." | ".."))
     {
         return None;
     }
@@ -242,6 +245,10 @@ mod tests {
             "https://www.youtube.com/watch_videos?video_ids=a,b",
             "https://www.youtube.com/shorts/../watch?v=abc&t=42",
             "https://www.youtube.com/shorts/./abc?si=x",
+            "https://www.youtube.com/shorts/%2e%2e/watch?v=abc&t=42",
+            "https://www.youtube.com/shorts/.%2E/watch?v=abc&t=42",
+            "https://example.com:65536/?utm_source=x",
+            "https://example.com:+80/?utm_source=x",
             "https://?utm_source=x",
             "https://example.com:abc/?utm_source=x",
             "https://example.com/?utm_source=x\u{0}",
