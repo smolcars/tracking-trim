@@ -1,30 +1,14 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod clean;
+mod icon;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+use tray_icon::TrayIconBuilder;
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem};
-use tray_icon::{Icon, TrayIconBuilder};
 
 static PAUSED: AtomicBool = AtomicBool::new(false);
-
-fn icon() -> Icon {
-    const SIZE: i32 = 32;
-    let rgba = (0..SIZE * SIZE)
-        .flat_map(|i| {
-            // Doubled coordinates put the centre of the even-sized grid on an integer.
-            let (x, y) = (2 * (i % SIZE) + 1 - SIZE, 2 * (i / SIZE) + 1 - SIZE);
-            let alpha = if x * x + y * y <= SIZE * SIZE {
-                0xff
-            } else {
-                0
-            };
-            [0x2e, 0xa0, 0x43, alpha]
-        })
-        .collect();
-    Icon::from_rgba(rgba, SIZE as u32, SIZE as u32).expect("icon is 32x32 RGBA")
-}
 
 fn poll() {
     let mut clipboard = arboard::Clipboard::new().unwrap_or_else(|e| {
@@ -86,11 +70,15 @@ fn main() {
         }
     }));
 
-    let tray = TrayIconBuilder::new()
-        .with_icon(icon())
+    let builder = TrayIconBuilder::new()
         .with_tooltip("tracking-trim")
-        .with_menu(Box::new(Menu::with_items(&[&pause, &quit]).expect("menu")))
-        .build();
+        .with_menu(Box::new(Menu::with_items(&[&pause, &quit]).expect("menu")));
+    // Template: macOS recolors the alpha mask for light and dark menu bars.
+    #[cfg(target_os = "macos")]
+    let builder = builder.with_icon_templated(icon::tray_icon());
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.with_icon(icon::tray_icon());
+    let tray = builder.build();
     // Linux keeps cleaning without a session bus; elsewhere no tray means no way to quit.
     if let Err(e) = &tray {
         eprintln!("tracking-trim: no tray: {e}");
@@ -115,13 +103,5 @@ fn main() {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn icon_is_valid_rgba() {
-        super::icon();
     }
 }
