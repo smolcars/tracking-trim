@@ -60,9 +60,13 @@ jobs:
         run: tar czf ../../${{ matrix.asset }} ${{ matrix.bin }}
       - if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Windows'
         run: Compress-Archive -Path target/release/${{ matrix.bin }} -DestinationPath ${{ matrix.asset }}
+      # Release body = the CHANGELOG.md section whose heading is the tag; fails if it is missing.
+      - if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: awk -v tag="$GITHUB_REF_NAME" '$1 == "##" && $2 == tag {on=1; next} $1 == "##" {on=0} on' CHANGELOG.md > notes.md && test -s notes.md
       - if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
-          generate_release_notes: true
+          body_path: notes.md
           files: ${{ matrix.asset }}

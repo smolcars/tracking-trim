@@ -17,6 +17,8 @@ with tracking parameters removed. See PLAN.md for the design and rules table.
   proven locally (`cargo fmt --check`, `cargo clippy -- -D warnings`,
   `cargo test`, and a manual run on the host OS).
 - If you create a git worktree, remove it when you are done.
+- Before pushing a `vX.Y.Z` tag, add a matching `## vX.Y.Z` section to
+  `CHANGELOG.md`; the release job takes its notes from there and fails without it.
 - Cleaning rules live in `src/clean.rs`. Prefer path-based "drop every query
   param" rules for sites whose path already identifies the content; use the
   global denylist only for everything else. Add a unit test for every new rule.

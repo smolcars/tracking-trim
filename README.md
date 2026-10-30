@@ -57,6 +57,8 @@ The registration stores the binary's full path, so moving the binary breaks it. 
 
 ## Releases
 
+Release notes come from `CHANGELOG.md`: add a `## vX.Y.Z` section before tagging, or the release job fails.
+
 Every `v*` tag publishes release archives to GitHub Releases. The binaries are unsigned and not notarized; to avoid that, build from source as described under [Build](#build).
 
 | Platform | Architecture | Asset |
