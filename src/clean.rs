@@ -20,7 +20,7 @@ const DENYLIST: List = &[
 
 pub fn clean(text: &str) -> Option<String> {
     let url = text.trim();
-    if url.contains(char::is_whitespace) {
+    if url.contains(|c: char| c.is_whitespace() || c.is_control()) {
         return None;
     }
     let (head, fragment) = url.split_at(url.find('#').unwrap_or(url.len()));
@@ -30,12 +30,16 @@ pub fn clean(text: &str) -> Option<String> {
         return None;
     }
     let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
-    let host = authority
-        .rsplit('@')
-        .next()?
-        .split(':')
-        .next()?
-        .to_ascii_lowercase();
+    let host_port = authority.rsplit('@').next()?;
+    let (host, port) = host_port.split_once(':').unwrap_or((host_port, ""));
+    // Malformed authority or dot segments: a browser would read the URL differently, so leave it.
+    if host.is_empty()
+        || !port.bytes().all(|b| b.is_ascii_digit())
+        || path.split('/').any(|seg| seg == "." || seg == "..")
+    {
+        return None;
+    }
+    let host = host.to_ascii_lowercase();
 
     let rule = PATH_RULES.iter().find(|(hosts, markers, exact, _)| {
         // Subdomain match already covers www./m./mobile., so they need no stripping.
@@ -50,11 +54,7 @@ pub fn clean(text: &str) -> Option<String> {
     let kept: Vec<&str> = query
         .split('&')
         .filter(|param| {
-            let name = param
-                .split('=')
-                .next()
-                .unwrap_or_default()
-                .to_ascii_lowercase();
+            let name = decoded_lower(param.split('=').next().unwrap_or_default());
             match rule {
                 Some((_, _, _, keep)) => keep.contains(&name.as_str()),
                 None => !name.starts_with("utm_") && !DENYLIST.contains(&name.as_str()),
@@ -69,6 +69,29 @@ pub fn clean(text: &str) -> Option<String> {
         format!("{base}?{query}{fragment}")
     };
     (cleaned != url).then_some(cleaned)
+}
+
+// Compares names as a browser would read them (%76 is v) while the output keeps the original bytes.
+fn decoded_lower(name: &str) -> String {
+    let hex = |b: &u8| (*b as char).to_digit(16).map(|d| d as u8);
+    let (bytes, mut out, mut i) = (name.as_bytes(), Vec::with_capacity(name.len()), 0);
+    while i < bytes.len() {
+        match (
+            bytes[i],
+            bytes.get(i + 1).and_then(hex),
+            bytes.get(i + 2).and_then(hex),
+        ) {
+            (b'%', Some(hi), Some(lo)) => {
+                out.push(hi * 16 + lo);
+                i += 3;
+            }
+            (b, _, _) => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).to_ascii_lowercase()
 }
 
 #[cfg(test)]
@@ -109,6 +132,15 @@ mod tests {
             (
                 "https://www.instagram.com/p/X/?img_index=2&igsh=abc",
                 "https://www.instagram.com/p/X/?img_index=2",
+            ),
+            // Encoded names are compared decoded but written back untouched.
+            (
+                "https://www.youtube.com/watch?%76=abc&%74=42&si=xyz",
+                "https://www.youtube.com/watch?%76=abc&%74=42",
+            ),
+            (
+                "https://example.com/?%75tm_source=a&id=1",
+                "https://example.com/?id=1",
             ),
             (
                 "https://example.com/page?utm_source=a&id=5&fbclid=zz#frag",
@@ -208,6 +240,12 @@ mod tests {
             "https://x.com@evil.com/status/1?s=20",
             "https://example.com/page?id=5\n",
             "https://www.youtube.com/watch_videos?video_ids=a,b",
+            "https://www.youtube.com/shorts/../watch?v=abc&t=42",
+            "https://www.youtube.com/shorts/./abc?si=x",
+            "https://?utm_source=x",
+            "https://example.com:abc/?utm_source=x",
+            "https://example.com/?utm_source=x\u{0}",
+            "https://[::1]:8080/?utm_source=x",
         ] {
             assert_eq!(clean(input), None, "{input}");
         }
